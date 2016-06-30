@@ -1,0 +1,13 @@
+Flowpack:
+  JobQueue:
+    Doctrine:
+      testing:
+        # Set to TRUE to enable functional testing against a database server and adjust backendOptions
+        # enabled: TRUE
+#        backendOptions:
+#          driver: 'pdo_mysql'
+#          host: NULL
+#          dbname: NULL
+#          user: NULL
+#          password: NULL
+#          charset: 'utf8'
