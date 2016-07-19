@@ -76,7 +76,7 @@ class DoctrineQueue implements QueueInterface
         if (isset($options['tableName'])) {
             $this->tableName = $options['tableName'];
         } else {
-            $this->tableName = $this->name . '_messages';
+            $this->tableName = 'flowpack_jobqueue_messages_' . $this->name;
         }
         $this->options = $options;
     }
