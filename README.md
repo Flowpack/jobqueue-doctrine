@@ -10,7 +10,7 @@ Install the package using composer:
 composer require flowpack/jobqueue-doctrine
 ```
 
-If not already installed, that fetch its requirements, namely the `jobqueue-common` package.
+If not already installed, that will fetch its requirements, namely the `jobqueue-common` package.
 
 Now the queue can be configured like this:
 
