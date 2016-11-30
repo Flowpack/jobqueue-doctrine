@@ -1,10 +1,10 @@
 {
     "name": "flowpack/jobqueue-doctrine",
-    "type": "typo3-flow-package",
+    "type": "neos-package",
     "description": "Implements concrete Queue for the doctrine work queue. Requires the packages flowpack/jobqueue-common to be installed.",
     "license": "MIT",
     "require": {
-        "flowpack/jobqueue-common": "^1.0"
+        "flowpack/jobqueue-common": "*"
     },
     "autoload": {
         "psr-4": {
