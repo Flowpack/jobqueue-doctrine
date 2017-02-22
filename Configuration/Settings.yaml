@@ -1,11 +1,12 @@
-Flowpack:
-  JobQueue:
-    Common:
-      queues:
-        'deployments':
-          options:
-
+#Flowpack:
+#  JobQueue:
+#    Common:
+#      queues:
+#        'deployments':
+#          options:
+#
 #            If "backendOptions" are not specified, Flow's default Doctrine connection will be used:
+#
 #            backendOptions:
 #              driver: 'pdo_mysql'
 #              host: '%env:JOB_QUEUE_DATABASE_HOST%'
@@ -13,10 +14,10 @@ Flowpack:
 #              user: '%env:JOB_QUEUE_DATABASE_USER%'
 #              password: '%env:JOB_QUEUE_DATABASE_PASSWORD%'
 #              unix_socket: '%env:JOB_QUEUE_DATABASE_SOCKET%'
-
-            defaultTimeout: 60
-            pollInterval: 1
-
+#
+#            defaultTimeout: 60
+#            pollInterval: 1
+#
 #            If no "tableName" is specified, a table name prefixed with "flowpack_jobqueue_messages_" will be used:
 #            tableName: 'custom_table_name'
 
