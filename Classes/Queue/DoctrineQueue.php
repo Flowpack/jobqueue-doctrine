@@ -13,6 +13,7 @@ namespace Flowpack\JobQueue\Doctrine\Queue;
 
 use Doctrine\Common\Persistence\ObjectManager as DoctrineObjectManager;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\DBALException;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Exception\TableNotFoundException;
 use Doctrine\ORM\EntityManager as DoctrineEntityManager;
@@ -85,6 +86,7 @@ class DoctrineQueue implements QueueInterface
     /**
      * @param DoctrineObjectManager $doctrineEntityManager
      * @return void
+     * @throws DBALException
      */
     public function injectDoctrineEntityManager(DoctrineObjectManager $doctrineEntityManager)
     {
@@ -96,7 +98,7 @@ class DoctrineQueue implements QueueInterface
         }
     }
 
-     /**
+    /**
      * @inheritdoc
      */
     public function setUp()
@@ -236,13 +238,30 @@ class DoctrineQueue implements QueueInterface
     /**
      * @inheritdoc
      */
-    public function count()
+    public function countReady(): int
     {
         return (integer)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready'");
     }
 
     /**
+     * @inheritdoc
+     */
+    public function countReserved(): int
+    {
+        return (integer)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'reserved'");
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function countFailed(): int
+    {
+        return (integer)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'failed'");
+    }
+
+    /**
      * @return void
+     * @throws DBALException
      */
     public function flush()
     {
@@ -274,7 +293,7 @@ class DoctrineQueue implements QueueInterface
             case 'postgresql':
                 return 'NOW() + INTERVAL \'' . (integer)$options['delay'] . ' SECOND\'';
             default:
-                return'DATE_ADD(NOW(), INTERVAL ' . (integer)$options['delay'] . ' SECOND)';
+                return 'DATE_ADD(NOW(), INTERVAL ' . (integer)$options['delay'] . ' SECOND)';
         }
     }
 
