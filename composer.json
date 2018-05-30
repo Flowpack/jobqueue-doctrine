@@ -5,7 +5,7 @@
     "license": "MIT",
     "require": {
         "neos/flow": "~4.0",
-        "flowpack/jobqueue-common": "^2.0"
+        "flowpack/jobqueue-common": "^3.0 || dev-master"
     },
     "autoload": {
         "psr-4": {
