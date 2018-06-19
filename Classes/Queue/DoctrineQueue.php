@@ -15,6 +15,7 @@ use Doctrine\Common\Persistence\ObjectManager as DoctrineObjectManager;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DBALException;
 use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Exception\InvalidArgumentException;
 use Doctrine\DBAL\Exception\TableNotFoundException;
 use Doctrine\ORM\EntityManager as DoctrineEntityManager;
 use Flowpack\JobQueue\Common\Queue\Message;
@@ -100,8 +101,9 @@ class DoctrineQueue implements QueueInterface
 
     /**
      * @inheritdoc
+     * @throws DBALException
      */
-    public function setUp()
+    public function setUp(): void
     {
         switch ($this->connection->getDatabasePlatform()->getName()) {
             case 'sqlite':
@@ -119,15 +121,16 @@ class DoctrineQueue implements QueueInterface
     /**
      * @inheritdoc
      */
-    public function getName()
+    public function getName(): string
     {
         return $this->name;
     }
 
     /**
      * @inheritdoc
+     * @throws DBALException
      */
-    public function submit($payload, array $options = [])
+    public function submit($payload, array $options = []): string
     {
         if ($this->connection->getDatabasePlatform()->getName() === 'postgresql') {
             $insertStatement = $this->connection->prepare("INSERT INTO {$this->connection->quoteIdentifier($this->tableName)} (payload, state, scheduled) VALUES (:payload, 'ready', {$this->resolveScheduledQueryPart($options)}) RETURNING id");
@@ -144,38 +147,44 @@ class DoctrineQueue implements QueueInterface
 
     /**
      * @inheritdoc
+     * @throws DBALException
      */
-    public function waitAndTake($timeout = null)
+    public function waitAndTake(?int $timeout = null): ?Message
     {
         $message = $this->reserveMessage($timeout);
         if ($message === null) {
             return null;
         }
+
         $numberOfDeletedRows = $this->connection->delete($this->connection->quoteIdentifier($this->tableName), ['id' => (integer)$message->getIdentifier()]);
         if ($numberOfDeletedRows !== 1) {
             // TODO error handling
             return null;
         }
+
         return $message;
     }
 
     /**
      * @inheritdoc
+     * @throws DBALException
      */
-    public function waitAndReserve($timeout = null)
+    public function waitAndReserve(?int $timeout = null): ?Message
     {
         return $this->reserveMessage($timeout);
     }
 
     /**
-     * @param integer $timeout
+     * @param int $timeout
      * @return Message
+     * @throws DBALException
      */
-    protected function reserveMessage($timeout = null)
+    protected function reserveMessage(?int $timeout = null): ?Message
     {
         if ($timeout === null) {
             $timeout = $this->defaultTimeout;
         }
+
         $startTime = time();
         do {
             try {
@@ -194,13 +203,15 @@ class DoctrineQueue implements QueueInterface
             }
             sleep($this->pollInterval);
         } while (true);
+
         return null;
     }
 
     /**
      * @inheritdoc
+     * @throws DBALException
      */
-    public function release($messageId, array $options = [])
+    public function release(string $messageId, array $options = []): void
     {
         $this->connection->executeUpdate("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'ready', failures = failures + 1, scheduled = {$this->resolveScheduledQueryPart($options)} WHERE id = :id", ['id' => (integer)$messageId]);
     }
@@ -208,15 +219,16 @@ class DoctrineQueue implements QueueInterface
     /**
      * @inheritdoc
      */
-    public function abort($messageId)
+    public function abort(string $messageId): void
     {
         $this->connection->update($this->connection->quoteIdentifier($this->tableName), ['state' => 'failed'], ['id' => (integer)$messageId]);
     }
 
     /**
      * @inheritdoc
+     * @throws InvalidArgumentException
      */
-    public function finish($messageId)
+    public function finish(string $messageId): bool
     {
         return $this->connection->delete($this->connection->quoteIdentifier($this->tableName), ['id' => (integer)$messageId]) === 1;
     }
@@ -224,14 +236,16 @@ class DoctrineQueue implements QueueInterface
     /**
      * @inheritdoc
      */
-    public function peek($limit = 1)
+    public function peek(int $limit = 1): array
     {
         $limit = (integer)$limit;
         $rows = $this->connection->fetchAll("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} LIMIT $limit");
         $messages = [];
+
         foreach ($rows as $row) {
             $messages[] = $this->getMessageFromRow($row);
         }
+
         return $messages;
     }
 
@@ -263,7 +277,7 @@ class DoctrineQueue implements QueueInterface
      * @return void
      * @throws DBALException
      */
-    public function flush()
+    public function flush(): void
     {
         $this->connection->exec("DROP TABLE IF EXISTS {$this->connection->quoteIdentifier($this->tableName)}");
         $this->setUp();
@@ -273,7 +287,7 @@ class DoctrineQueue implements QueueInterface
      * @param array $row
      * @return Message
      */
-    protected function getMessageFromRow(array $row)
+    protected function getMessageFromRow(array $row): Message
     {
         return new Message($row['id'], json_decode($row['payload'], true), (integer)$row['failures']);
     }
@@ -282,7 +296,7 @@ class DoctrineQueue implements QueueInterface
      * @param array $options
      * @return string
      */
-    protected function resolveScheduledQueryPart(array $options)
+    protected function resolveScheduledQueryPart(array $options): string
     {
         if (!isset($options['delay'])) {
             return 'null';
@@ -300,7 +314,7 @@ class DoctrineQueue implements QueueInterface
     /**
      * @return string
      */
-    protected function getScheduledQueryConstraint()
+    protected function getScheduledQueryConstraint(): string
     {
         switch ($this->connection->getDatabasePlatform()->getName()) {
             case 'sqlite':
