@@ -4,7 +4,7 @@
     "description": "Implements concrete Queue for the doctrine work queue. Requires the packages flowpack/jobqueue-common to be installed.",
     "license": "MIT",
     "require": {
-        "neos/flow": "~4.0",
+        "neos/flow": "^4.0 || ^5.0",
         "flowpack/jobqueue-common": "^3.0 || dev-master"
     },
     "autoload": {
