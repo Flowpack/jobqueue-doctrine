@@ -50,6 +50,12 @@ class DoctrineQueue implements QueueInterface
     protected $defaultTimeout = 60;
 
     /**
+     * @Flow\Inject
+     * @var \Doctrine\ORM\EntityManagerInterface
+     */
+    protected $entityManager;
+
+    /**
      * Interval messages are looked up in waitAnd*(), in seconds
      *
      * @var int
@@ -189,15 +195,16 @@ class DoctrineQueue implements QueueInterface
         $startTime = time();
         do {
             try {
-                $row = $this->connection->fetchAssoc("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} LIMIT 1");
-            } catch (TableNotFoundException $exception) {
-                throw new \RuntimeException(sprintf('The queue table "%s" could not be found. Did you run ./flow queue:setup "%s"?', $this->tableName, $this->name), 1469117906, $exception);
-            }
-            if ($row !== false) {
-                $numberOfUpdatedRows = $this->connection->executeUpdate("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'reserved' WHERE id = :id AND state = 'ready' AND {$this->getScheduledQueryConstraint()}", ['id' => (integer)$row['id']]);
+                $numberOfUpdatedRows = $this->connection->executeUpdate("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'reserved' WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()}  AND LAST_INSERT_ID(id) OR LAST_INSERT_ID(0) LIMIT 1");
+
                 if ($numberOfUpdatedRows === 1) {
+                    $lastUpdatedRow = $this->entityManager->getConnection()->lastInsertId();
+                    $row = $this->connection->fetchAssoc("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE id={$lastUpdatedRow}");
                     return $this->getMessageFromRow($row);
                 }
+            } catch (TableNotFoundException $exception) {
+                throw new \RuntimeException(sprintf('The queue table "%s" could not be found. Did you run ./flow queue:setup "%s"?',
+                    $this->tableName, $this->name), 1469117906, $exception);
             }
             if (time() - $startTime >= $timeout) {
                 return null;
