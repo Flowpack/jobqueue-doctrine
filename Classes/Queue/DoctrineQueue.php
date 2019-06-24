@@ -200,7 +200,7 @@ class DoctrineQueue implements QueueInterface
                 if ($numberOfUpdatedRows === 1) {
                     $lastUpdatedRow = $this->entityManager->getConnection()->lastInsertId();
                     $row = $this->connection->fetchAssoc("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE id={$lastUpdatedRow}");
-                    if(!$row) {
+                    if($row !== false) {
                         return $this->getMessageFromRow($row);
                     }
                 }
