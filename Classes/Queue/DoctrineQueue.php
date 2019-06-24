@@ -200,7 +200,9 @@ class DoctrineQueue implements QueueInterface
                 if ($numberOfUpdatedRows === 1) {
                     $lastUpdatedRow = $this->entityManager->getConnection()->lastInsertId();
                     $row = $this->connection->fetchAssoc("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE id={$lastUpdatedRow}");
-                    return $this->getMessageFromRow($row);
+                    if(!$row) {
+                        return $this->getMessageFromRow($row);
+                    }
                 }
             } catch (TableNotFoundException $exception) {
                 throw new \RuntimeException(sprintf('The queue table "%s" could not be found. Did you run ./flow queue:setup "%s"?',
