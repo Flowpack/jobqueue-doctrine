@@ -11,13 +11,12 @@ namespace Flowpack\JobQueue\Doctrine\Queue;
  * source code.
  */
 
-use Doctrine\Common\Persistence\ObjectManager as DoctrineObjectManager;
+use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DBALException;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Exception\InvalidArgumentException;
 use Doctrine\DBAL\Exception\TableNotFoundException;
-use Doctrine\ORM\EntityManager as DoctrineEntityManager;
 use Flowpack\JobQueue\Common\Queue\Message;
 use Flowpack\JobQueue\Common\Queue\QueueInterface;
 use Neos\Flow\Annotations as Flow;
@@ -85,16 +84,15 @@ class DoctrineQueue implements QueueInterface
     }
 
     /**
-     * @param DoctrineObjectManager $doctrineEntityManager
+     * @param EntityManagerInterface $doctrineEntityManager
      * @return void
      * @throws DBALException
      */
-    public function injectDoctrineEntityManager(DoctrineObjectManager $doctrineEntityManager)
+    public function injectDoctrineEntityManager(EntityManagerInterface $doctrineEntityManager)
     {
         if (isset($this->options['backendOptions'])) {
             $this->connection = DriverManager::getConnection($this->options['backendOptions']);
         } else {
-            /** @var DoctrineEntityManager $doctrineEntityManager */
             $this->connection = $doctrineEntityManager->getConnection();
         }
     }
