@@ -23,9 +23,6 @@ Flowpack:
           className: 'Flowpack\JobQueue\Doctrine\Queue\DoctrineQueue'
           executeIsolated: true
           options:
-            client:
-              host: 127.0.0.11
-              port: 11301
             defaultTimeout: 50
           releaseOptions:
             priority: 512
