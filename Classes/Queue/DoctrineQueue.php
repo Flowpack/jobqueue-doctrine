@@ -116,7 +116,7 @@ class DoctrineQueue implements QueueInterface
         $this->connection->exec($createDatabaseStatement);
         try {
             $this->connection->exec("CREATE INDEX state_scheduled ON {$this->connection->quoteIdentifier($this->tableName)} (state, scheduled)");
-        } catch (Exception $e) {
+        } catch (\Doctrine\DBAL\Exception $e) {
             // See https://dba.stackexchange.com/questions/24531/mysql-create-index-if-not-exists
         }
     }
