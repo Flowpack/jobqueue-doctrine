@@ -19,7 +19,6 @@ use Doctrine\DBAL\Exception\InvalidArgumentException;
 use Doctrine\DBAL\Exception\TableNotFoundException;
 use Flowpack\JobQueue\Common\Queue\Message;
 use Flowpack\JobQueue\Common\Queue\QueueInterface;
-use Neos\Flow\Annotations as Flow;
 
 /**
  * A queue implementation using doctrine as the queue backend
@@ -116,7 +115,7 @@ class DoctrineQueue implements QueueInterface
         $this->connection->exec($createDatabaseStatement);
         try {
             $this->connection->exec("CREATE INDEX state_scheduled ON {$this->connection->quoteIdentifier($this->tableName)} (state, scheduled)");
-        } catch (Exception $e) {
+        } catch (DBALException $e) {
             // See https://dba.stackexchange.com/questions/24531/mysql-create-index-if-not-exists
         }
     }
