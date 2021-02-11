@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace Flowpack\JobQueue\Doctrine\Queue;
 
 /*
@@ -65,7 +67,7 @@ class DoctrineQueue implements QueueInterface
      * @param string $name
      * @param array $options
      */
-    public function __construct($name, array $options)
+    public function __construct(string $name, array $options)
     {
         $this->name = $name;
         if (isset($options['defaultTimeout'])) {
@@ -87,7 +89,7 @@ class DoctrineQueue implements QueueInterface
      * @return void
      * @throws DBALException
      */
-    public function injectDoctrineEntityManager(EntityManagerInterface $doctrineEntityManager)
+    public function injectDoctrineEntityManager(EntityManagerInterface $doctrineEntityManager): void
     {
         if (isset($this->options['backendOptions'])) {
             $this->connection = DriverManager::getConnection($this->options['backendOptions']);
@@ -137,14 +139,14 @@ class DoctrineQueue implements QueueInterface
         if ($this->connection->getDatabasePlatform()->getName() === 'postgresql') {
             $insertStatement = $this->connection->prepare("INSERT INTO {$this->connection->quoteIdentifier($this->tableName)} (payload, state, scheduled) VALUES (:payload, 'ready', {$this->resolveScheduledQueryPart($options)}) RETURNING id");
             $insertStatement->execute(['payload' => json_encode($payload)]);
-            return (string)$insertStatement->fetchColumn(0);
-        } else {
-            $numberOfAffectedRows = $this->connection->executeUpdate("INSERT INTO {$this->connection->quoteIdentifier($this->tableName)} (payload, state, scheduled) VALUES (:payload, 'ready', {$this->resolveScheduledQueryPart($options)})", ['payload' => json_encode($payload)]);
-            if ($numberOfAffectedRows !== 1) {
-                return null;
-            }
-            return (string)$this->connection->lastInsertId();
+            return (string)$insertStatement->fetchColumn();
         }
+
+        $numberOfAffectedRows = $this->connection->executeUpdate("INSERT INTO {$this->connection->quoteIdentifier($this->tableName)} (payload, state, scheduled) VALUES (:payload, 'ready', {$this->resolveScheduledQueryPart($options)})", ['payload' => json_encode($payload)]);
+        if ($numberOfAffectedRows !== 1) {
+            return '';
+        }
+        return (string)$this->connection->lastInsertId();
     }
 
     /**
@@ -205,8 +207,6 @@ class DoctrineQueue implements QueueInterface
             }
             sleep($this->pollInterval);
         } while (true);
-
-        return null;
     }
 
     /**
@@ -240,7 +240,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function peek(int $limit = 1): array
     {
-        $limit = (integer)$limit;
+        $limit = $limit;
         $rows = $this->connection->fetchAll("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} LIMIT $limit");
         $messages = [];
 
