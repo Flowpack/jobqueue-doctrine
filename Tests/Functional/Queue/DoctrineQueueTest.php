@@ -25,6 +25,6 @@ class DoctrineQueueTest extends AbstractQueueTest
      */
     protected function getQueue()
     {
-        return new DoctrineQueue('Test-queue', $this->queueSettings);
+        return new DoctrineQueue('testqueue', $this->queueSettings);
     }
 }
