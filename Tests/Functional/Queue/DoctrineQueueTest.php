@@ -13,6 +13,7 @@ namespace Flowpack\JobQueue\Doctrine\Tests\Functional\Queue;
 
 use Flowpack\JobQueue\Doctrine\Queue\DoctrineQueue;
 use Flowpack\JobQueue\Common\Tests\Functional\AbstractQueueTest;
+use ReflectionProperty;
 
 /**
  * Functional test for DoctrineQueue
@@ -26,5 +27,23 @@ class DoctrineQueueTest extends AbstractQueueTest
     protected function getQueue()
     {
         return new DoctrineQueue('testqueue', $this->queueSettings);
+    }
+
+    /**
+     * @test
+     */
+    public function makeSureThatDatabaseConnectionGetsRestored()
+    {
+        $property = new ReflectionProperty(DoctrineQueue::class, 'connection');
+        $property->setAccessible(true);
+
+        $queue = $this->getQueue();
+
+        $property->getValue($queue)->query('SET SESSION wait_timeout=1');
+
+        sleep(2);
+
+        $messageId = $queue->submit(['some testing payload']);
+        $this->assertEquals('string', gettype($messageId), 'messageId should be type of string');
     }
 }

@@ -36,6 +36,11 @@ class DoctrineQueue implements QueueInterface
     protected $options;
 
     /**
+     * @var EntityManagerInterface
+     */
+    protected $doctrineEntityManager;
+
+    /**
      * @var Connection
      */
     protected $connection;
@@ -89,10 +94,28 @@ class DoctrineQueue implements QueueInterface
      */
     public function injectDoctrineEntityManager(EntityManagerInterface $doctrineEntityManager)
     {
+        $this->doctrineEntityManager = $doctrineEntityManager;
+
         if (isset($this->options['backendOptions'])) {
             $this->connection = DriverManager::getConnection($this->options['backendOptions']);
         } else {
             $this->connection = $doctrineEntityManager->getConnection();
+        }
+    }
+
+    /**
+     * @throws DBALException
+     */
+    protected function ensureDatabaseConnection(): void
+    {
+        try {
+            $this->connection->fetchAssoc("SELECT 1");
+        } catch (DBALException $e) {
+            if (isset($this->options['backendOptions'])) {
+                $this->connection = DriverManager::getConnection($this->options['backendOptions']);
+            } else {
+                $this->connection = $this->doctrineEntityManager->getConnection();
+            }
         }
     }
 
@@ -134,6 +157,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function submit($payload, array $options = []): string
     {
+        $this->ensureDatabaseConnection();
+
         if ($this->connection->getDatabasePlatform()->getName() === 'postgresql') {
             $insertStatement = $this->connection->prepare("INSERT INTO {$this->connection->quoteIdentifier($this->tableName)} (payload, state, scheduled) VALUES (:payload, 'ready', {$this->resolveScheduledQueryPart($options)}) RETURNING id");
             $insertStatement->execute(['payload' => json_encode($payload)]);
@@ -153,6 +178,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function waitAndTake(?int $timeout = null): ?Message
     {
+        $this->ensureDatabaseConnection();
+
         $message = $this->reserveMessage($timeout);
         if ($message === null) {
             return null;
@@ -183,6 +210,8 @@ class DoctrineQueue implements QueueInterface
      */
     protected function reserveMessage(?int $timeout = null): ?Message
     {
+        $this->ensureDatabaseConnection();
+
         if ($timeout === null) {
             $timeout = $this->defaultTimeout;
         }
@@ -215,6 +244,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function release(string $messageId, array $options = []): void
     {
+        $this->ensureDatabaseConnection();
+
         $this->connection->executeUpdate("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'ready', failures = failures + 1, scheduled = {$this->resolveScheduledQueryPart($options)} WHERE id = :id", ['id' => (integer)$messageId]);
     }
 
@@ -223,6 +254,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function abort(string $messageId): void
     {
+        $this->ensureDatabaseConnection();
+
         $this->connection->update($this->connection->quoteIdentifier($this->tableName), ['state' => 'failed'], ['id' => (integer)$messageId]);
     }
 
@@ -232,6 +265,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function finish(string $messageId): bool
     {
+        $this->ensureDatabaseConnection();
+
         return $this->connection->delete($this->connection->quoteIdentifier($this->tableName), ['id' => (integer)$messageId]) === 1;
     }
 
@@ -240,6 +275,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function peek(int $limit = 1): array
     {
+        $this->ensureDatabaseConnection();
+
         $limit = (integer)$limit;
         $rows = $this->connection->fetchAll("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} LIMIT $limit");
         $messages = [];
@@ -256,6 +293,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function countReady(): int
     {
+        $this->ensureDatabaseConnection();
+
         return (integer)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready'");
     }
 
@@ -264,6 +303,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function countReserved(): int
     {
+        $this->ensureDatabaseConnection();
+
         return (integer)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'reserved'");
     }
 
@@ -272,6 +313,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function countFailed(): int
     {
+        $this->ensureDatabaseConnection();
+
         return (integer)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'failed'");
     }
 
@@ -281,6 +324,8 @@ class DoctrineQueue implements QueueInterface
      */
     public function flush(): void
     {
+        $this->ensureDatabaseConnection();
+
         $this->connection->exec("DROP TABLE IF EXISTS {$this->connection->quoteIdentifier($this->tableName)}");
         $this->setUp();
     }
