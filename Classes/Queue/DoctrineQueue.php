@@ -186,6 +186,7 @@ class DoctrineQueue implements QueueInterface
         if ($timeout === null) {
             $timeout = $this->defaultTimeout;
         }
+        $this->reconnectDatabaseConnection();
 
         $startTime = time();
         do {
@@ -323,6 +324,22 @@ class DoctrineQueue implements QueueInterface
                 return '(scheduled IS NULL OR scheduled <= datetime("now"))';
             default:
                 return '(scheduled IS NULL OR scheduled <= NOW())';
+        }
+    }
+    
+    /**
+     * Reconnects the database connection associated with this storage, if it doesn't respond to a ping
+     *
+     * @see \Neos\Flow\Persistence\Doctrine\PersistenceManager::persistAll()
+     * @return void
+     */
+    private function reconnectDatabaseConnection(): void
+    {
+        try {
+            $this->connection->fetchOne('SELECT 1');
+        } catch (\Exception $e) {
+            $this->connection->close();
+            $this->connection->connect();
         }
     }
 }
