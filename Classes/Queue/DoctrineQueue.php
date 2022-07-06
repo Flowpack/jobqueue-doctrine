@@ -11,12 +11,12 @@ namespace Flowpack\JobQueue\Doctrine\Queue;
  * source code.
  */
 
-use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DBALException;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Exception\InvalidArgumentException;
 use Doctrine\DBAL\Exception\TableNotFoundException;
+use Doctrine\ORM\EntityManagerInterface;
 use Flowpack\JobQueue\Common\Queue\Message;
 use Flowpack\JobQueue\Common\Queue\QueueInterface;
 
@@ -48,11 +48,32 @@ class DoctrineQueue implements QueueInterface
     protected $defaultTimeout = 60;
 
     /**
-     * Interval messages are looked up in waitAnd*(), in seconds
+     * Interval messages are looked up in waitAnd*(), in microseconds
      *
      * @var int
      */
-    protected $pollInterval = 1;
+    protected $pollInterval = 1000000;
+
+    /**
+     * Interval messages are looked up in waitAnd*(), if any messages were processed within the last $boostTime microseconds; in microseconds
+     *
+     * @var int
+     */
+    protected $boostPollInterval = 500000;
+
+    /**
+     * Number of microseconds of the "boost time": If any messages were processed within that time, the special $boostPollInterval is used instead of the default $pollInterval; in microseconds
+     *
+     * @var int
+     */
+    protected $boostTime = 10000000;
+
+    /**
+     * Time when the last message was processed
+     *
+     * @var int|null
+     */
+    protected $lastMessageTime;
 
     /**
      * Name of the table to store queue messages. Defaults to "<name>_messages"
@@ -72,7 +93,13 @@ class DoctrineQueue implements QueueInterface
             $this->defaultTimeout = (integer)$options['defaultTimeout'];
         }
         if (isset($options['pollInterval'])) {
-            $this->pollInterval = (integer)$options['pollInterval'];
+            $this->pollInterval = (integer)($options['pollInterval'] * 1000000);
+        }
+        if (isset($options['boostPollInterval'])) {
+            $this->boostPollInterval = (integer)($options['boostPollInterval'] * 1000000);
+        }
+        if (isset($options['boostTime'])) {
+            $this->boostTime = (integer)($options['boostTime'] * 1000000);
         }
         if (isset($options['tableName'])) {
             $this->tableName = $options['tableName'];
@@ -105,10 +132,10 @@ class DoctrineQueue implements QueueInterface
         switch ($this->connection->getDatabasePlatform()->getName()) {
             case 'sqlite':
                 $createDatabaseStatement = "CREATE TABLE IF NOT EXISTS {$this->connection->quoteIdentifier($this->tableName)} (id INTEGER PRIMARY KEY AUTOINCREMENT, payload LONGTEXT NOT NULL, state VARCHAR(255) NOT NULL, failures INTEGER NOT NULL DEFAULT 0, scheduled TEXT DEFAULT NULL)";
-                break;
+            break;
             case 'postgresql':
                 $createDatabaseStatement = "CREATE TABLE IF NOT EXISTS {$this->connection->quoteIdentifier($this->tableName)} (id SERIAL PRIMARY KEY, payload TEXT NOT NULL, state VARCHAR(255) NOT NULL, failures INTEGER NOT NULL DEFAULT 0, scheduled TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL)";
-                break;
+            break;
             default:
                 $createDatabaseStatement = "CREATE TABLE IF NOT EXISTS {$this->connection->quoteIdentifier($this->tableName)} (id INTEGER PRIMARY KEY AUTO_INCREMENT, payload LONGTEXT NOT NULL, state VARCHAR(255) NOT NULL, failures INTEGER NOT NULL DEFAULT 0, scheduled DATETIME DEFAULT NULL) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci ENGINE = InnoDB";
         }
@@ -177,8 +204,8 @@ class DoctrineQueue implements QueueInterface
     }
 
     /**
-     * @param int $timeout
-     * @return Message
+     * @param int|null $timeout
+     * @return Message|null
      * @throws DBALException
      */
     protected function reserveMessage(?int $timeout = null): ?Message
@@ -186,7 +213,6 @@ class DoctrineQueue implements QueueInterface
         if ($timeout === null) {
             $timeout = $this->defaultTimeout;
         }
-
         $startTime = time();
         do {
             try {
@@ -197,16 +223,17 @@ class DoctrineQueue implements QueueInterface
             if ($row !== false) {
                 $numberOfUpdatedRows = $this->connection->executeUpdate("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'reserved' WHERE id = :id AND state = 'ready' AND {$this->getScheduledQueryConstraint()}", ['id' => (integer)$row['id']]);
                 if ($numberOfUpdatedRows === 1) {
+                    $this->lastMessageTime = time();
                     return $this->getMessageFromRow($row);
                 }
             }
             if (time() - $startTime >= $timeout) {
                 return null;
             }
-            sleep($this->pollInterval);
-        } while (true);
 
-        return null;
+            $currentPollInterval = ((int)$this->lastMessageTime + (int)($this->boostTime / 1000000) > time()) ? $this->boostPollInterval : $this->pollInterval;
+            usleep($currentPollInterval);
+        } while (true);
     }
 
     /**
