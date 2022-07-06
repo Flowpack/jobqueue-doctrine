@@ -328,7 +328,7 @@ class DoctrineQueue implements QueueInterface
     }
     
     /**
-     * Reconnects the database connection associated with this storage, if it doesn't respond to a ping
+     * Reconnects the database connection associated with this queue, if it doesn't respond to a ping
      *
      * @see \Neos\Flow\Persistence\Doctrine\PersistenceManager::persistAll()
      * @return void
