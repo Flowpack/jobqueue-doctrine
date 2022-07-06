@@ -190,7 +190,7 @@ class DoctrineQueue implements QueueInterface
         $startTime = time();
         do {
             try {
-                $row = $this->connection->fetchAssoc("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} LIMIT 1");
+                $row = $this->connection->fetchAssoc("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT 1");
             } catch (TableNotFoundException $exception) {
                 throw new \RuntimeException(sprintf('The queue table "%s" could not be found. Did you run ./flow queue:setup "%s"?', $this->tableName, $this->name), 1469117906, $exception);
             }
@@ -241,7 +241,7 @@ class DoctrineQueue implements QueueInterface
     public function peek(int $limit = 1): array
     {
         $limit = (integer)$limit;
-        $rows = $this->connection->fetchAll("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} LIMIT $limit");
+        $rows = $this->connection->fetchAll("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT $limit");
         $messages = [];
 
         foreach ($rows as $row) {
