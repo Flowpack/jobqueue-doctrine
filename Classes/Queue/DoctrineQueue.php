@@ -92,16 +92,16 @@ class DoctrineQueue implements QueueInterface
     {
         $this->name = $name;
         if (isset($options['defaultTimeout'])) {
-            $this->defaultTimeout = (integer)$options['defaultTimeout'];
+            $this->defaultTimeout = (int)$options['defaultTimeout'];
         }
         if (isset($options['pollInterval'])) {
-            $this->pollInterval = (integer)($options['pollInterval'] * 1000000);
+            $this->pollInterval = (int)($options['pollInterval'] * 1000000);
         }
         if (isset($options['boostPollInterval'])) {
-            $this->boostPollInterval = (integer)($options['boostPollInterval'] * 1000000);
+            $this->boostPollInterval = (int)($options['boostPollInterval'] * 1000000);
         }
         if (isset($options['boostTime'])) {
-            $this->boostTime = (integer)($options['boostTime'] * 1000000);
+            $this->boostTime = (int)($options['boostTime'] * 1000000);
         }
         if (isset($options['tableName'])) {
             $this->tableName = $options['tableName'];
@@ -187,7 +187,7 @@ class DoctrineQueue implements QueueInterface
             return null;
         }
 
-        $numberOfDeletedRows = $this->connection->delete($this->connection->quoteIdentifier($this->tableName), ['id' => (integer)$message->getIdentifier()]);
+        $numberOfDeletedRows = $this->connection->delete($this->connection->quoteIdentifier($this->tableName), ['id' => (int)$message->getIdentifier()]);
         if ($numberOfDeletedRows !== 1) {
             // TODO error handling
             return null;
@@ -225,7 +225,7 @@ class DoctrineQueue implements QueueInterface
                 throw new \RuntimeException(sprintf('The queue table "%s" could not be found. Did you run ./flow queue:setup "%s"?', $this->tableName, $this->name), 1469117906, $exception);
             }
             if ($row !== false) {
-                $numberOfUpdatedRows = (int)$this->connection->executeStatement("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'reserved' WHERE id = :id AND state = 'ready' AND {$this->getScheduledQueryConstraint()}", ['id' => (integer)$row['id']]);
+                $numberOfUpdatedRows = (int)$this->connection->executeStatement("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'reserved' WHERE id = :id AND state = 'ready' AND {$this->getScheduledQueryConstraint()}", ['id' => (int)$row['id']]);
                 if ($numberOfUpdatedRows === 1) {
                     $this->lastMessageTime = time();
                     return $this->getMessageFromRow($row);
@@ -246,7 +246,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function release(string $messageId, array $options = []): void
     {
-        $this->connection->executeStatement("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'ready', failures = failures + 1, scheduled = {$this->resolveScheduledQueryPart($options)} WHERE id = :id", ['id' => (integer)$messageId]);
+        $this->connection->executeStatement("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'ready', failures = failures + 1, scheduled = {$this->resolveScheduledQueryPart($options)} WHERE id = :id", ['id' => (int)$messageId]);
     }
 
     /**
@@ -254,7 +254,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function abort(string $messageId): void
     {
-        $this->connection->update($this->connection->quoteIdentifier($this->tableName), ['state' => 'failed'], ['id' => (integer)$messageId]);
+        $this->connection->update($this->connection->quoteIdentifier($this->tableName), ['state' => 'failed'], ['id' => (int)$messageId]);
     }
 
     /**
@@ -263,7 +263,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function finish(string $messageId): bool
     {
-        return $this->connection->delete($this->connection->quoteIdentifier($this->tableName), ['id' => (integer)$messageId]) === 1;
+        return $this->connection->delete($this->connection->quoteIdentifier($this->tableName), ['id' => (int)$messageId]) === 1;
     }
 
     /**
@@ -286,7 +286,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function countReady(): int
     {
-        return (integer)$this->connection->fetchOne("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready'");
+        return (int)$this->connection->fetchOne("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready'");
     }
 
     /**
@@ -294,7 +294,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function countReserved(): int
     {
-        return (integer)$this->connection->fetchOne("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'reserved'");
+        return (int)$this->connection->fetchOne("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'reserved'");
     }
 
     /**
@@ -302,7 +302,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function countFailed(): int
     {
-        return (integer)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'failed'");
+        return (int)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'failed'");
     }
 
     /**
@@ -321,7 +321,7 @@ class DoctrineQueue implements QueueInterface
      */
     protected function getMessageFromRow(array $row): Message
     {
-        return new Message($row['id'], json_decode($row['payload'], true), (integer)$row['failures']);
+        return new Message($row['id'], json_decode($row['payload'], true), (int)$row['failures']);
     }
 
     /**
@@ -335,11 +335,11 @@ class DoctrineQueue implements QueueInterface
         }
         switch ($this->connection->getDatabasePlatform()->getName()) {
             case 'sqlite':
-                return 'datetime(\'now\', \'+' . (integer)$options['delay'] . ' second\')';
+                return 'datetime(\'now\', \'+' . (int)$options['delay'] . ' second\')';
             case 'postgresql':
-                return 'NOW() + INTERVAL \'' . (integer)$options['delay'] . ' SECOND\'';
+                return 'NOW() + INTERVAL \'' . (int)$options['delay'] . ' SECOND\'';
             default:
-                return 'DATE_ADD(NOW(), INTERVAL ' . (integer)$options['delay'] . ' SECOND)';
+                return 'DATE_ADD(NOW(), INTERVAL ' . (int)$options['delay'] . ' SECOND)';
         }
     }
 
@@ -355,7 +355,7 @@ class DoctrineQueue implements QueueInterface
                 return '(scheduled IS NULL OR scheduled <= NOW())';
         }
     }
-    
+
     /**
      * Reconnects the database connection associated with this queue, if it doesn't respond to a ping
      *
