@@ -17,6 +17,8 @@
 #
 #            defaultTimeout: 60
 #            pollInterval: 1
+#            boostPollInterval: 0.5
+#            boostTime: 10
 #
 #            If no "tableName" is specified, a table name prefixed with "flowpack_jobqueue_messages_" will be used:
 #            tableName: 'custom_table_name'
