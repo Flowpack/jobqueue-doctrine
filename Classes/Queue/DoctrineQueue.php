@@ -240,7 +240,6 @@ class DoctrineQueue implements QueueInterface
      */
     public function peek(int $limit = 1): array
     {
-        $limit = $limit;
         $rows = $this->connection->fetchAllAssociative("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} LIMIT $limit");
         $messages = [];
 
