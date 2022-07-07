@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace Flowpack\JobQueue\Doctrine\Queue;
 
 /*
@@ -86,7 +88,7 @@ class DoctrineQueue implements QueueInterface
      * @param string $name
      * @param array $options
      */
-    public function __construct($name, array $options)
+    public function __construct(string $name, array $options)
     {
         $this->name = $name;
         if (isset($options['defaultTimeout'])) {
@@ -114,7 +116,7 @@ class DoctrineQueue implements QueueInterface
      * @return void
      * @throws DBALException
      */
-    public function injectDoctrineEntityManager(EntityManagerInterface $doctrineEntityManager)
+    public function injectDoctrineEntityManager(EntityManagerInterface $doctrineEntityManager): void
     {
         if (isset($this->options['backendOptions'])) {
             $this->connection = DriverManager::getConnection($this->options['backendOptions']);
@@ -163,15 +165,15 @@ class DoctrineQueue implements QueueInterface
     {
         if ($this->connection->getDatabasePlatform()->getName() === 'postgresql') {
             $insertStatement = $this->connection->prepare("INSERT INTO {$this->connection->quoteIdentifier($this->tableName)} (payload, state, scheduled) VALUES (:payload, 'ready', {$this->resolveScheduledQueryPart($options)}) RETURNING id");
-            $insertStatement->execute(['payload' => json_encode($payload)]);
-            return (string)$insertStatement->fetchColumn(0);
-        } else {
-            $numberOfAffectedRows = $this->connection->executeUpdate("INSERT INTO {$this->connection->quoteIdentifier($this->tableName)} (payload, state, scheduled) VALUES (:payload, 'ready', {$this->resolveScheduledQueryPart($options)})", ['payload' => json_encode($payload)]);
-            if ($numberOfAffectedRows !== 1) {
-                return null;
-            }
-            return (string)$this->connection->lastInsertId();
+            $result = $insertStatement->executeQuery(['payload' => json_encode($payload)]);
+            return (string)$result->fetchOne();
         }
+
+        $numberOfAffectedRows = (int)$this->connection->executeStatement("INSERT INTO {$this->connection->quoteIdentifier($this->tableName)} (payload, state, scheduled) VALUES (:payload, 'ready', {$this->resolveScheduledQueryPart($options)})", ['payload' => json_encode($payload)]);
+        if ($numberOfAffectedRows !== 1) {
+            return '';
+        }
+        return (string)$this->connection->lastInsertId();
     }
 
     /**
@@ -213,18 +215,17 @@ class DoctrineQueue implements QueueInterface
         if ($timeout === null) {
             $timeout = $this->defaultTimeout;
         }
-
         $this->reconnectDatabaseConnection();
-        
+
         $startTime = time();
         do {
             try {
-                $row = $this->connection->fetchAssoc("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT 1");
+                $row = $this->connection->fetchAssociative("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT 1");
             } catch (TableNotFoundException $exception) {
                 throw new \RuntimeException(sprintf('The queue table "%s" could not be found. Did you run ./flow queue:setup "%s"?', $this->tableName, $this->name), 1469117906, $exception);
             }
             if ($row !== false) {
-                $numberOfUpdatedRows = $this->connection->executeUpdate("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'reserved' WHERE id = :id AND state = 'ready' AND {$this->getScheduledQueryConstraint()}", ['id' => (integer)$row['id']]);
+                $numberOfUpdatedRows = (int)$this->connection->executeStatement("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'reserved' WHERE id = :id AND state = 'ready' AND {$this->getScheduledQueryConstraint()}", ['id' => (integer)$row['id']]);
                 if ($numberOfUpdatedRows === 1) {
                     $this->lastMessageTime = time();
                     return $this->getMessageFromRow($row);
@@ -245,7 +246,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function release(string $messageId, array $options = []): void
     {
-        $this->connection->executeUpdate("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'ready', failures = failures + 1, scheduled = {$this->resolveScheduledQueryPart($options)} WHERE id = :id", ['id' => (integer)$messageId]);
+        $this->connection->executeStatement("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'ready', failures = failures + 1, scheduled = {$this->resolveScheduledQueryPart($options)} WHERE id = :id", ['id' => (integer)$messageId]);
     }
 
     /**
@@ -270,8 +271,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function peek(int $limit = 1): array
     {
-        $limit = (integer)$limit;
-        $rows = $this->connection->fetchAll("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT $limit");
+        $rows = $this->connection->fetchAllAssociative("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT $limit");
         $messages = [];
 
         foreach ($rows as $row) {
@@ -286,7 +286,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function countReady(): int
     {
-        return (integer)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready'");
+        return (integer)$this->connection->fetchOne("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready'");
     }
 
     /**
@@ -294,7 +294,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function countReserved(): int
     {
-        return (integer)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'reserved'");
+        return (integer)$this->connection->fetchOne("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'reserved'");
     }
 
     /**
@@ -311,7 +311,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function flush(): void
     {
-        $this->connection->exec("DROP TABLE IF EXISTS {$this->connection->quoteIdentifier($this->tableName)}");
+        $this->connection->executeStatement("DROP TABLE IF EXISTS {$this->connection->quoteIdentifier($this->tableName)}");
         $this->setUp();
     }
 
