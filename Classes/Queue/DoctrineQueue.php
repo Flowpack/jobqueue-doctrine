@@ -188,11 +188,12 @@ class DoctrineQueue implements QueueInterface
         if ($timeout === null) {
             $timeout = $this->defaultTimeout;
         }
+        $this->reconnectDatabaseConnection();
 
         $startTime = time();
         do {
             try {
-                $row = $this->connection->fetchAssociative("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} LIMIT 1");
+                $row = $this->connection->fetchAssociative("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT 1");
             } catch (TableNotFoundException $exception) {
                 throw new \RuntimeException(sprintf('The queue table "%s" could not be found. Did you run ./flow queue:setup "%s"?', $this->tableName, $this->name), 1469117906, $exception);
             }
@@ -240,7 +241,7 @@ class DoctrineQueue implements QueueInterface
      */
     public function peek(int $limit = 1): array
     {
-        $rows = $this->connection->fetchAllAssociative("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} LIMIT $limit");
+        $rows = $this->connection->fetchAllAssociative("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT $limit");
         $messages = [];
 
         foreach ($rows as $row) {
@@ -322,6 +323,22 @@ class DoctrineQueue implements QueueInterface
                 return '(scheduled IS NULL OR scheduled <= datetime("now"))';
             default:
                 return '(scheduled IS NULL OR scheduled <= NOW())';
+        }
+    }
+    
+    /**
+     * Reconnects the database connection associated with this queue, if it doesn't respond to a ping
+     *
+     * @see \Neos\Flow\Persistence\Doctrine\PersistenceManager::persistAll()
+     * @return void
+     */
+    private function reconnectDatabaseConnection(): void
+    {
+        try {
+            $this->connection->fetchOne('SELECT 1');
+        } catch (\Exception $e) {
+            $this->connection->close();
+            $this->connection->connect();
         }
     }
 }
