@@ -1,7 +1,6 @@
 # Flowpack.JobQueue.Doctrine
 
-A job queue backend for the [Flowpack.JobQueue.Common](https://github.
-com/Flowpack/jobqueue-common) package based on [Doctrine](http://www.doctrine-project.org/).
+A job queue backend for the [Flowpack.JobQueue.Common](https://github.com/Flowpack/jobqueue-common) package based on [Doctrine](http://www.doctrine-project.org/).
 
 ## Usage
 
