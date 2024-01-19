@@ -70,8 +70,7 @@ currently active Flow database).
 
 ### Submit options
 
-Additional options supported by `JobManager::queue()`, `DoctrineQueue::submit
-()` and the `Job\Defer` annotation:
+Additional options supported by `JobManager::queue()`, `DoctrineQueue::submit()` and the `Job\Defer` annotation:
 
 | Option | Type    | Default | Description                                                                                                                                                           |
 |--------|---------|--------:|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -79,7 +78,7 @@ Additional options supported by `JobManager::queue()`, `DoctrineQueue::submit
 
 ### Release options
 
-Additional options to be specified via `releaseOptions`: 
+Additional options to be specified via `releaseOptions` for the queue:
 
 | Option | Type    | Default | Description                                                                      |
 |--------|---------|--------:|----------------------------------------------------------------------------------|
