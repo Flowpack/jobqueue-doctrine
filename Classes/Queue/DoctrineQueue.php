@@ -21,6 +21,7 @@ use Doctrine\DBAL\Exception\InvalidArgumentException;
 use Doctrine\DBAL\Exception\TableNotFoundException;
 use Doctrine\DBAL\Query\Expression\CompositeExpression;
 use Doctrine\DBAL\Query\QueryBuilder;
+use Doctrine\DBAL\Schema\Schema;
 use Doctrine\ORM\EntityManagerInterface;
 use Flowpack\JobQueue\Common\Queue\Message;
 use Flowpack\JobQueue\Common\Queue\QueueInterface;
@@ -107,21 +108,29 @@ class DoctrineQueue implements QueueInterface
      */
     public function setUp(): void
     {
-        switch ($this->connection->getDatabasePlatform()->getName()) {
-            case 'sqlite':
-                $createDatabaseStatement = "CREATE TABLE IF NOT EXISTS {$this->connection->quoteIdentifier($this->tableName)} (id INTEGER PRIMARY KEY AUTOINCREMENT, payload LONGTEXT NOT NULL, state VARCHAR(255) NOT NULL, failures INTEGER NOT NULL DEFAULT 0, scheduled TEXT DEFAULT NULL)";
-            break;
-            case 'postgresql':
-                $createDatabaseStatement = "CREATE TABLE IF NOT EXISTS {$this->connection->quoteIdentifier($this->tableName)} (id SERIAL PRIMARY KEY, payload TEXT NOT NULL, state VARCHAR(255) NOT NULL, failures INTEGER NOT NULL DEFAULT 0, scheduled TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL)";
-            break;
-            default:
-                $createDatabaseStatement = "CREATE TABLE IF NOT EXISTS {$this->connection->quoteIdentifier($this->tableName)} (id INTEGER PRIMARY KEY AUTO_INCREMENT, payload LONGTEXT NOT NULL, state VARCHAR(255) NOT NULL, failures INTEGER NOT NULL DEFAULT 0, scheduled DATETIME DEFAULT NULL) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci ENGINE = InnoDB";
+        $databasePlatform = $this->connection->getDatabasePlatform();
+        if ($databasePlatform === null) {
+            throw new \RuntimeException('No database platform for current connection', 1703863019);
         }
-        $this->connection->exec($createDatabaseStatement);
-        try {
-            $this->connection->exec("CREATE INDEX state_scheduled ON {$this->connection->quoteIdentifier($this->tableName)} (state, scheduled)");
-        } catch (DBALException $e) {
-            // See https://dba.stackexchange.com/questions/24531/mysql-create-index-if-not-exists
+        $schemaManager = $this->connection->getSchemaManager();
+        if ($schemaManager === null) {
+            throw new \RuntimeException('No schema manager for current connection', 1703863021);
+        }
+        if (!$schemaManager->tablesExist($this->tableName)) {
+            $schema = new Schema();
+            $table = $schema->createTable($this->connection->quoteIdentifier($this->tableName));
+            $table->addColumn('id', 'integer', ['autoincrement' => true]);
+            $table->addColumn('payload', 'text');
+            $table->addColumn('state', 'string', ['length' => 255]);
+            $table->addColumn('failures', 'integer', ['default' => 0]);
+            $table->addColumn('scheduled', 'datetime', ['notnull' => false]);
+            $table->setPrimaryKey(['id']);
+            $table->addIndex(['state', 'scheduled'], 'state_scheduled');
+
+            $createDatabaseStatements = $schema->toSql($databasePlatform);
+            foreach ($createDatabaseStatements as $createDatabaseStatement) {
+                $this->connection->exec($createDatabaseStatement);
+            }
         }
     }
 
@@ -191,15 +200,38 @@ class DoctrineQueue implements QueueInterface
         }
         $this->reconnectDatabaseConnection();
 
+        $qb = $this->connection->createQueryBuilder();
+        $qb
+            ->select('*')
+            ->from($this->connection->quoteIdentifier($this->tableName))
+            ->where(
+                $qb->expr()->and(
+                    $qb->expr()->eq('state', $qb->expr()->literal('ready')),
+                    $this->getScheduledQueryConstraint($qb)
+                )
+            )
+            ->orderBy('id')
+            ->setMaxResults(1);
         $startTime = time();
         do {
             try {
-                $row = $this->connection->fetchAssociative("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT 1");
+                $row = $qb->execute()->fetchAssociative();
             } catch (TableNotFoundException $exception) {
                 throw new \RuntimeException(sprintf('The queue table "%s" could not be found. Did you run ./flow queue:setup "%s"?', $this->tableName, $this->name), 1469117906, $exception);
             }
             if ($row !== false) {
-                $numberOfUpdatedRows = (int)$this->connection->executeStatement("UPDATE {$this->connection->quoteIdentifier($this->tableName)} SET state = 'reserved' WHERE id = :id AND state = 'ready' AND {$this->getScheduledQueryConstraint()}", ['id' => (int)$row['id']]);
+                $innerQueryBuilder = $this->connection->createQueryBuilder();
+                $innerQueryBuilder
+                    ->update($this->connection->quoteIdentifier($this->tableName))
+                    ->set('state', $innerQueryBuilder->expr()->literal('reserved'))
+                    ->where(
+                        $innerQueryBuilder->expr()->and(
+                            $innerQueryBuilder->expr()->eq('id', (int)$row['id']),
+                            $innerQueryBuilder->expr()->eq('state', $innerQueryBuilder->expr()->literal('ready')),
+                            $this->getScheduledQueryConstraint($innerQueryBuilder)
+                        )
+                    );
+                $numberOfUpdatedRows = (int)$this->connection->executeStatement($innerQueryBuilder->getSQL());
                 if ($numberOfUpdatedRows === 1) {
                     $this->lastMessageTime = time();
                     return $this->getMessageFromRow($row);
@@ -245,7 +277,19 @@ class DoctrineQueue implements QueueInterface
      */
     public function peek(int $limit = 1): array
     {
-        $rows = $this->connection->fetchAllAssociative("SELECT * FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready' AND {$this->getScheduledQueryConstraint()} ORDER BY id ASC LIMIT $limit");
+        $qb = $this->connection->createQueryBuilder();
+        $qb
+            ->select('*')
+            ->from($this->connection->quoteIdentifier($this->tableName))
+            ->where(
+                $qb->expr()->and(
+                    $qb->expr()->eq('state', $qb->expr()->literal('ready')),
+                    $this->getScheduledQueryConstraint($qb)
+                )
+            )
+            ->orderBy('id')
+            ->setMaxResults($limit);
+        $rows = $qb->execute()->fetchAllAssociative();
         $messages = [];
 
         foreach ($rows as $row) {
@@ -260,7 +304,15 @@ class DoctrineQueue implements QueueInterface
      */
     public function countReady(): int
     {
-        return (int)$this->connection->fetchOne("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'ready'");
+        $qb = $this->connection->createQueryBuilder();
+        return (int)$qb
+            ->select('COUNT(*)')
+            ->from($this->connection->quoteIdentifier($this->tableName))
+            ->where(
+                $qb->expr()->eq('state', $qb->expr()->literal('ready')),
+            )
+            ->execute()
+            ->fetchOne();
     }
 
     /**
@@ -268,7 +320,15 @@ class DoctrineQueue implements QueueInterface
      */
     public function countReserved(): int
     {
-        return (int)$this->connection->fetchOne("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'reserved'");
+        $qb = $this->connection->createQueryBuilder();
+        return (int)$qb
+            ->select('COUNT(*)')
+            ->from($this->connection->quoteIdentifier($this->tableName))
+            ->where(
+                $qb->expr()->eq('state', $qb->expr()->literal('reserved')),
+            )
+            ->execute()
+            ->fetchOne();
     }
 
     /**
@@ -276,7 +336,15 @@ class DoctrineQueue implements QueueInterface
      */
     public function countFailed(): int
     {
-        return (int)$this->connection->fetchColumn("SELECT COUNT(*) FROM {$this->connection->quoteIdentifier($this->tableName)} WHERE state = 'failed'");
+        $qb = $this->connection->createQueryBuilder();
+        return (int)$qb
+            ->select('COUNT(*)')
+            ->from($this->connection->quoteIdentifier($this->tableName))
+            ->where(
+                $qb->expr()->eq('state', $qb->expr()->literal('failed')),
+            )
+            ->execute()
+            ->fetchOne();
     }
 
     /**
@@ -284,7 +352,14 @@ class DoctrineQueue implements QueueInterface
      */
     public function flush(): void
     {
-        $this->connection->executeStatement("DROP TABLE IF EXISTS {$this->connection->quoteIdentifier($this->tableName)}");
+        $schemaManager = $this->connection->getSchemaManager();
+        if ($schemaManager === null) {
+            throw new \RuntimeException('No schema manager in current connection', 1703863433);
+        }
+
+        if ($schemaManager->tablesExist($this->tableName)) {
+            $schemaManager->dropTable($this->connection->quoteIdentifier($this->tableName));
+        }
         $this->setUp();
     }
 
@@ -301,24 +376,16 @@ class DoctrineQueue implements QueueInterface
         if (!isset($options['delay'])) {
             return 'null';
         }
-        switch ($this->connection->getDatabasePlatform()->getName()) {
-            case 'sqlite':
-                return 'datetime(\'now\', \'+' . (int)$options['delay'] . ' second\')';
-            case 'postgresql':
-                return 'NOW() + INTERVAL \'' . (int)$options['delay'] . ' SECOND\'';
-            default:
-                return 'DATE_ADD(NOW(), INTERVAL ' . (int)$options['delay'] . ' SECOND)';
-        }
+
+        return $this->connection->getDatabasePlatform()->getDateAddSecondsExpression($this->connection->getDatabasePlatform()->getCurrentTimestampSQL(), (int)$options['delay']);
     }
 
     protected function getScheduledQueryConstraint(QueryBuilder $qb): CompositeExpression
     {
-        switch ($this->connection->getDatabasePlatform()->getName()) {
-            case 'sqlite':
-                return '(scheduled IS NULL OR scheduled <= datetime("now"))';
-            default:
-                return '(scheduled IS NULL OR scheduled <= NOW())';
-        }
+        return $qb->expr()->or(
+            $qb->expr()->isNull('scheduled'),
+            $qb->expr()->lte('scheduled', $this->connection->getDatabasePlatform()->getCurrentTimestampSQL())
+        );
     }
 
     /**
