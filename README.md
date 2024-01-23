@@ -62,15 +62,15 @@ The `DoctrineQueue` supports following options:
 | tableName         | string  | flowpack_jobqueue_messages_<queue-name> | Name of the database table for this queue. By default this is the queue name prefixed with "flowpack_jobqueue_messages_"                                                |
 | backendOptions    | array   |                                       - | Doctrine-specific connection params (see [Doctrine reference](http://doctrine-orm.readthedocs.io/projects/doctrine-dbal/en/latest/reference/configuration.html))        |
 
-*NOTE:* The `DoctrineQueue` currently supports `MySQL`, `PostgreSQL` and 
-`SQLite` backends. You can specify the backend via the `backendOptions`. If 
-you omit this setting, the *current connection* will be re-used (i.e. the 
+*NOTE:* The `DoctrineQueue` should work with any database supported by
+Doctrine DBAL. It has been tested on MySQL, PostgreSQL, SQL Server and 
+SQLite. You can specify the backend via the `backendOptions`. If  you
+omit this setting, the *current connection* will be re-used (i.e. the 
 currently active Flow database).
 
 ### Submit options
 
-Additional options supported by `JobManager::queue()`, `DoctrineQueue::submit
-()` and the `Job\Defer` annotation:
+Additional options supported by `JobManager::queue()`, `DoctrineQueue::submit()` and the `Job\Defer` annotation:
 
 | Option | Type    | Default | Description                                                                                                                                                           |
 |--------|---------|--------:|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -78,7 +78,7 @@ Additional options supported by `JobManager::queue()`, `DoctrineQueue::submit
 
 ### Release options
 
-Additional options to be specified via `releaseOptions`: 
+Additional options to be specified via `releaseOptions` for the queue:
 
 | Option | Type    | Default | Description                                                                      |
 |--------|---------|--------:|----------------------------------------------------------------------------------|
