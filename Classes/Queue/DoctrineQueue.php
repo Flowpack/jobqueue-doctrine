@@ -74,13 +74,13 @@ class DoctrineQueue implements QueueInterface
             $this->defaultTimeout = (int)$options['defaultTimeout'];
         }
         if (isset($options['pollInterval'])) {
-            $this->pollInterval = (int)$options['pollInterval'] * 1000000;
+            $this->pollInterval = (int)($options['pollInterval'] * 1000000);
         }
         if (isset($options['boostPollInterval'])) {
-            $this->boostPollInterval = (int)$options['boostPollInterval'] * 1000000;
+            $this->boostPollInterval = (int)($options['boostPollInterval'] * 1000000);
         }
         if (isset($options['boostTime'])) {
-            $this->boostTime = (int)$options['boostTime'] * 1000000;
+            $this->boostTime = (int)($options['boostTime'] * 1000000);
         }
         if (isset($options['tableName'])) {
             $this->tableName = $options['tableName'];
