@@ -394,7 +394,7 @@ class DoctrineQueue implements QueueInterface
      */
     protected function getMessageFromRow(array $row): Message
     {
-        return new Message($row['id'], json_decode($row['payload'], true, 512, JSON_THROW_ON_ERROR), (int)$row['failures']);
+        return new Message((string)$row['id'], json_decode($row['payload'], true, 512, JSON_THROW_ON_ERROR), (int)$row['failures']);
     }
 
     /**
