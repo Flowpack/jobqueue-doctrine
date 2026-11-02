@@ -22,15 +22,30 @@ use Doctrine\DBAL\Exception\TableNotFoundException;
 use Doctrine\DBAL\Query\Expression\CompositeExpression;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Doctrine\DBAL\Schema\Schema;
+use Doctrine\DBAL\Schema\Table;
+use Doctrine\DBAL\Schema\TableDiff;
 use Doctrine\ORM\EntityManagerInterface;
 use Flowpack\JobQueue\Common\Queue\Message;
 use Flowpack\JobQueue\Common\Queue\QueueInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * A queue implementation using doctrine as the queue backend
+ *
+ * Every reservation records when and by which process (hostname and PID) it was made. A worker
+ * that is killed while it holds a reservation would otherwise leave the message "reserved"
+ * forever. While waiting for messages, the queue therefore releases such orphaned reservations:
+ * immediately if the reserving process ran on the same host and is gone, otherwise once the
+ * reservation is older than the "reservationTimeout" option. A released message counts as a
+ * failed attempt, just like a message released after an exception.
  */
 class DoctrineQueue implements QueueInterface
 {
+    /**
+     * Minimum interval between two searches for orphaned reservations, in seconds
+     */
+    private const STALE_RESERVATIONS_CHECK_INTERVAL = 60;
+
     protected string $name;
 
     protected array $options;
@@ -63,9 +78,21 @@ class DoctrineQueue implements QueueInterface
     protected int $lastMessageTime = 0;
 
     /**
+     * Age after which a reservation of a process on another host is considered orphaned, in seconds
+     */
+    protected int $reservationTimeout = 3600;
+
+    /**
+     * Time when orphaned reservations were last searched for
+     */
+    protected int $lastStaleReservationsCheckTime = 0;
+
+    /**
      * Name of the table to store queue messages. Defaults to "<name>_messages"
      */
     protected string $tableName;
+
+    protected ?LoggerInterface $logger = null;
 
     public function __construct(string $name, array $options)
     {
@@ -81,6 +108,9 @@ class DoctrineQueue implements QueueInterface
         }
         if (isset($options['boostTime'])) {
             $this->boostTime = (int)($options['boostTime'] * 1000000);
+        }
+        if (isset($options['reservationTimeout'])) {
+            $this->reservationTimeout = (int)$options['reservationTimeout'];
         }
         if (isset($options['tableName'])) {
             $this->tableName = $options['tableName'];
@@ -102,7 +132,14 @@ class DoctrineQueue implements QueueInterface
         }
     }
 
+    public function injectLogger(LoggerInterface $logger): void
+    {
+        $this->logger = $logger;
+    }
+
     /**
+     * Creates the queue table, or adds columns missing in a table created by an earlier version
+     *
      * @inheritdoc
      * @throws DBALException
      */
@@ -116,22 +153,28 @@ class DoctrineQueue implements QueueInterface
         if ($schemaManager === null) {
             throw new \RuntimeException('No schema manager for current connection', 1703863021);
         }
-        if (!$schemaManager->tablesExist($this->tableName)) {
-            $schema = new Schema();
-            $table = $schema->createTable($this->connection->quoteIdentifier($this->tableName));
-            $table->addColumn('id', 'integer', ['autoincrement' => true]);
-            $table->addColumn('payload', 'text');
-            $table->addColumn('state', 'string', ['length' => 255]);
-            $table->addColumn('failures', 'integer', ['default' => 0]);
-            $table->addColumn('scheduled', 'datetime', ['notnull' => false]);
-            $table->setPrimaryKey(['id']);
-            $table->addIndex(['state', 'scheduled'], 'state_scheduled');
 
-            $createDatabaseStatements = $schema->toSql($databasePlatform);
-            foreach ($createDatabaseStatements as $createDatabaseStatement) {
-                $this->connection->exec($createDatabaseStatement);
+        $schema = new Schema();
+        $table = $schema->createTable($this->connection->quoteIdentifier($this->tableName));
+        $table->addColumn('id', 'integer', ['autoincrement' => true]);
+        $table->addColumn('payload', 'text');
+        $table->addColumn('state', 'string', ['length' => 255]);
+        $table->addColumn('failures', 'integer', ['default' => 0]);
+        $table->addColumn('scheduled', 'datetime', ['notnull' => false]);
+        $table->addColumn('reserved_at', 'datetime', ['notnull' => false]);
+        $table->addColumn('reserved_by', 'string', ['length' => 255, 'notnull' => false]);
+        $table->setPrimaryKey(['id']);
+        $table->addIndex(['state', 'scheduled'], 'state_scheduled');
+
+        if (!$schemaManager->tablesExist($this->tableName)) {
+            foreach ($schema->toSql($databasePlatform) as $createDatabaseStatement) {
+                $this->connection->executeStatement($createDatabaseStatement);
             }
+            return;
         }
+
+        $existingTable = $schemaManager->listTableDetails($this->tableName);
+        $this->addMissingColumns($existingTable, $table);
     }
 
     /**
@@ -240,6 +283,8 @@ class DoctrineQueue implements QueueInterface
         $reserveMessageQuerySql = $reserveMessageQuery
             ->update($this->connection->quoteIdentifier($this->tableName))
             ->set('state', ':newstate')
+            ->set('reserved_at', $this->connection->getDatabasePlatform()->getCurrentTimestampSQL())
+            ->set('reserved_by', ':reservedBy')
             ->where('id = :id')
             ->andWhere('state = :state')
             ->andWhere($this->getScheduledQueryConstraint($reserveMessageQuery))
@@ -247,6 +292,9 @@ class DoctrineQueue implements QueueInterface
 
         $startTime = time();
         do {
+            if (time() - $this->lastStaleReservationsCheckTime >= self::STALE_RESERVATIONS_CHECK_INTERVAL) {
+                $this->releaseStaleReservations();
+            }
             try {
                 $row = $selectMessageQuery->execute()->fetchAssociative();
             } catch (TableNotFoundException $exception) {
@@ -257,6 +305,7 @@ class DoctrineQueue implements QueueInterface
                     $reserveMessageQuerySql,
                     [
                         'newstate' => 'reserved',
+                        'reservedBy' => $this->getProcessIdentifier(),
                         'id' => (int)$row['id'],
                         'state' => 'ready'
                     ]
@@ -283,7 +332,7 @@ class DoctrineQueue implements QueueInterface
     {
         $this->connection->executeStatement(
             sprintf(
-                "UPDATE %s SET state = 'ready', failures = failures + 1, scheduled = %s WHERE id = :id",
+                "UPDATE %s SET state = 'ready', failures = failures + 1, scheduled = %s, reserved_at = NULL, reserved_by = NULL WHERE id = :id",
                 $this->connection->quoteIdentifier($this->tableName),
                 $this->resolveScheduledQueryPart($options)
             ),
@@ -387,6 +436,119 @@ class DoctrineQueue implements QueueInterface
             $schemaManager->dropTable($this->connection->quoteIdentifier($this->tableName));
         }
         $this->setUp();
+    }
+
+    /**
+     * Releases reservations whose process is gone or which are older than the reservation timeout
+     *
+     * A reservation without a timestamp was made by an earlier version of this queue. It gets the
+     * current time as its timestamp, so that it is released after the regular timeout.
+     *
+     * @throws DBALException
+     */
+    protected function releaseStaleReservations(): void
+    {
+        $this->lastStaleReservationsCheckTime = time();
+        $databasePlatform = $this->connection->getDatabasePlatform();
+        $tableName = $this->connection->quoteIdentifier($this->tableName);
+
+        $this->connection->executeStatement(
+            sprintf("UPDATE %s SET reserved_at = %s WHERE state = 'reserved' AND reserved_at IS NULL", $tableName, $databasePlatform->getCurrentTimestampSQL())
+        );
+
+        $rows = $this->connection->fetchAllAssociative(
+            sprintf(
+                "SELECT id, reserved_by, CASE WHEN reserved_at <= %s THEN 1 ELSE 0 END AS timed_out FROM %s WHERE state = 'reserved'",
+                $databasePlatform->getDateSubSecondsExpression($databasePlatform->getCurrentTimestampSQL(), $this->reservationTimeout),
+                $tableName
+            )
+        );
+        foreach ($rows as $row) {
+            $reservedBy = $row['reserved_by'] !== null ? (string)$row['reserved_by'] : null;
+            $reason = $this->getStaleReservationReason($reservedBy, (bool)$row['timed_out']);
+            if ($reason === null) {
+                continue;
+            }
+            $numberOfReleasedRows = (int)$this->connection->executeStatement(
+                sprintf(
+                    "UPDATE %s SET state = 'ready', failures = failures + 1, reserved_at = NULL, reserved_by = NULL WHERE id = :id AND state = 'reserved' AND %s",
+                    $tableName,
+                    $reservedBy === null ? 'reserved_by IS NULL' : 'reserved_by = :reservedBy'
+                ),
+                $reservedBy === null ? ['id' => (int)$row['id']] : ['id' => (int)$row['id'], 'reservedBy' => $reservedBy]
+            );
+            if ($numberOfReleasedRows === 1 && $this->logger !== null) {
+                $this->logger->warning(sprintf('Released message %s in queue "%s" which was reserved by "%s": %s', $row['id'], $this->name, $reservedBy ?? 'unknown', $reason));
+            }
+        }
+    }
+
+    /**
+     * Returns why the given reservation is orphaned, or null if it may still be in progress
+     *
+     * The PID check only works for processes on this host. A reservation of another host
+     * (for example a container which was replaced) can only be judged by its age.
+     */
+    protected function getStaleReservationReason(?string $reservedBy, bool $timedOut): ?string
+    {
+        if ($reservedBy !== null && preg_match('/^(?<hostname>.+):(?<pid>\d+)$/', $reservedBy, $matches) === 1 && $matches['hostname'] === $this->getHostname()) {
+            return $this->isProcessRunning((int)$matches['pid']) ? null : 'the reserving process has ended';
+        }
+        return $timedOut ? sprintf('the reservation is older than %d seconds', $this->reservationTimeout) : null;
+    }
+
+    /**
+     * Identifies the current process across hosts, in the form "<hostname>:<pid>"
+     */
+    protected function getProcessIdentifier(): string
+    {
+        return $this->getHostname() . ':' . getmypid();
+    }
+
+    protected function getHostname(): string
+    {
+        return (string)gethostname();
+    }
+
+    /**
+     * Without the POSIX extension, every process counts as running, so that only the timeout applies.
+     */
+    protected function isProcessRunning(int $pid): bool
+    {
+        if (!function_exists('posix_kill')) {
+            return true;
+        }
+        if (posix_kill($pid, 0)) {
+            return true;
+        }
+        // EPERM: the process exists, but belongs to another user
+        return posix_get_last_error() === 1;
+    }
+
+    /**
+     * Adds the columns of $desiredTable which $existingTable lacks. Existing columns are left
+     * untouched, because altering them could rewrite large tables.
+     *
+     * @throws DBALException
+     */
+    protected function addMissingColumns(Table $existingTable, Table $desiredTable): void
+    {
+        $addedColumns = [];
+        foreach ($desiredTable->getColumns() as $column) {
+            if (!$existingTable->hasColumn($column->getName())) {
+                $addedColumns[$column->getName()] = $column;
+            }
+        }
+        if ($addedColumns === []) {
+            return;
+        }
+        // The introspected table has an unquoted name, which breaks names like "flowpack_jobqueue_messages_test-queue"
+        $quotedTableName = $this->connection->quoteIdentifier($this->tableName);
+        $existingTable = new Table($quotedTableName, $existingTable->getColumns(), $existingTable->getIndexes());
+        $tableDiff = new TableDiff($quotedTableName, $addedColumns, [], [], [], [], [], $existingTable);
+        foreach ($this->connection->getDatabasePlatform()->getAlterTableSQL($tableDiff) as $alterTableStatement) {
+            $this->connection->executeStatement($alterTableStatement);
+        }
     }
 
     /**

@@ -60,6 +60,7 @@ The `DoctrineQueue` supports following options:
 | boostPollInterval | float   |                                     0.5 | Number of seconds between SQL lookups for new messages when in "boost mode"                                                                                             |
 | boostTime         | float   |                                      10 | Maximum number of seconds since last processed message to activate "boost mode"                                                                                         |
 | tableName         | string  | flowpack_jobqueue_messages_<queue-name> | Name of the database table for this queue. By default this is the queue name prefixed with "flowpack_jobqueue_messages_"                                                |
+| reservationTimeout | integer |                                  3600 | Number of seconds after which a reservation of another host is considered orphaned and the message is released again (see below)                                     |
 | backendOptions    | array   |                                       - | Doctrine-specific connection params (see [Doctrine reference](http://doctrine-orm.readthedocs.io/projects/doctrine-dbal/en/latest/reference/configuration.html))        |
 
 *NOTE:* The `DoctrineQueue` should work with any database supported by
@@ -67,6 +68,27 @@ Doctrine DBAL. It has been tested on MySQL, PostgreSQL, SQL Server and
 SQLite. You can specify the backend via the `backendOptions`. If  you
 omit this setting, the *current connection* will be re-used (i.e. the 
 currently active Flow database).
+
+### Orphaned reservations
+
+A worker that is killed while it executes a job (for example when its
+container is replaced during a deployment) cannot release the message
+it reserved. To recover such messages, every reservation records when
+and by which process (`<hostname>:<pid>`) it was made. While a worker
+waits for messages, the queue checks the reservations at most once per
+minute and releases orphaned ones:
+
+* if the reserving process ran on the same host and no longer exists,
+  the message is released immediately
+* otherwise, the message is released once its reservation is older than
+  `reservationTimeout`
+
+A released message counts as a failed attempt. Together with
+`maximumNumberOfReleases` of the queue, this prevents a job that keeps
+killing its worker from being retried forever.
+
+Tables created by an earlier version lack the two columns for this.
+Run `./flow queue:setup <queue-name>` to add them.
 
 ### Submit options
 
